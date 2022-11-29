@@ -8,12 +8,14 @@ class Server:
 
     Functions:\n
     .start() starts the server.
+    .stop() stops the server.
     """
 
     serverRunning = True
 
     encoding = "utf-8"
     closeMsg = "/CLOSECON"
+    serverThreads = {}
 
     activeConnections = {}
     recvedMsg = {}
@@ -43,6 +45,7 @@ class Server:
         print(f"[SERVER] Listening on {self.serverIp}:{self.serverPort}")
 
         thread = threading.Thread(target=self.__waitForConnection)
+        self.serverThreads["waitForConThread"] = thread
         thread.start()
 
     def __waitForConnection(self):
@@ -52,8 +55,8 @@ class Server:
         while self.serverRunning:
             connection, address = self.server.accept()
 
-            thread = threading.Thread(
-                target=self.__handleConnection, args=(connection, address))
+            thread = threading.Thread(target=self.__handleConnection, args=(
+                connection, address), daemon=True)
             thread.start()
 
     def __handleConnection(self, connection, address):
@@ -119,8 +122,7 @@ class Server:
                     self.recvedMsg[address[0]])] = splitMsg[1]
 
         if not self.serverRunning:
-            # send con close msg
-            pass
+            self.__sendAll(self.closeMsg, address[0])
 
         connection.close()
         print(f"[CONNECTION] Lost connection from {address}")
@@ -133,11 +135,19 @@ class Server:
 
         Forbidden sing: |
         """
+        thread = threading.Thread(target=self.__sendAll, args=(msg, address))
+        thread.start()
+
+    def __sendAll(self, msg, address):
+        """
+        Do not use!
+        """
         connection = {}
+        print(self.activeConnections)
         if address != "all":
-            for i in self.activeConnections:
-                if i == address:
-                    connection = i[1]
+            for con in self.activeConnections:
+                if address == con:
+                    connection = self.activeConnections[address][1]
         else:
             connection = "all"
 
@@ -193,8 +203,8 @@ class Server:
             connection.send(message)
         elif connection == "all":
             for con in self.activeConnections:
-                con[1].send(sendLenght)
-                con[1].send(message)
+                self.activeConnections[con][1].send(sendLenght)
+                self.activeConnections[con][1].send(message)
 
     def getRecivedMsg(self):
         recvMsg = self.recvedMsg
@@ -212,6 +222,7 @@ class Server:
         """
         Stop the server instance and disconnect all clients
         """
+        self.send(self.closeMsg)
         self.serverRunning = False
 
 
