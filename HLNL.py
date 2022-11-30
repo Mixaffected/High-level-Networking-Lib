@@ -12,6 +12,7 @@ class Server:
     """
 
     serverRunning = True
+    serverStopped = False
 
     encoding = "utf-8"
     closeMsg = "/CLOSECON"
@@ -55,9 +56,10 @@ class Server:
         while self.serverRunning:
             connection, address = self.server.accept()
 
-            thread = threading.Thread(target=self.__handleConnection, args=(
-                connection, address), daemon=True)
-            thread.start()
+            if self.serverRunning:
+                thread = threading.Thread(
+                    target=self.__handleConnection, args=(connection, address))
+                thread.start()
 
     def __handleConnection(self, connection, address):
         """
@@ -121,7 +123,7 @@ class Server:
                 self.recvedMsg[address[0]][len(
                     self.recvedMsg[address[0]])] = splitMsg[1]
 
-        if not self.serverRunning:
+        if self.serverRunning and not self.serverStopped:
             self.__sendAll(self.closeMsg, address[0])
 
         connection.close()
@@ -138,10 +140,13 @@ class Server:
         thread = threading.Thread(target=self.__sendAll, args=(msg, address))
         thread.start()
 
-    def __sendAll(self, msg, address):
+    def __sendAll(self, msg, address="all"):
         """
         Do not use!
         """
+        if len(self.activeConnections) < 0:
+            return
+
         connection = {}
         print(self.activeConnections)
         if address != "all":
@@ -207,10 +212,9 @@ class Server:
                 self.activeConnections[con][1].send(message)
 
     def getRecivedMsg(self):
-        recvMsg = self.recvedMsg
+        recvMsg = dict(self.recvedMsg)
         for element in self.recvedMsg:
-            for el in element:
-                del el
+            self.recvedMsg[element] = {}
 
         return recvMsg
 
@@ -222,8 +226,9 @@ class Server:
         """
         Stop the server instance and disconnect all clients
         """
-        self.send(self.closeMsg)
+        self.__sendAll(self.closeMsg)
         self.serverRunning = False
+        self.serverStopped = True
 
 
 class Client:
@@ -257,10 +262,18 @@ class Client:
         """
         Connect to the specified server
         """
-        self.client.connect(self.address)
+        isConnected = False
 
-        thread = threading.Thread(target=self.__handleServerConnection)
-        thread.start()
+        try:
+            self.client.connect(self.address)
+        except Exception as e:
+            # print(f"{e}")
+            isConnected = False
+            raise e
+
+        if isConnected:
+            thread = threading.Thread(target=self.__handleServerConnection)
+            thread.start()
 
     def send(self, msg):
         """
@@ -333,7 +346,8 @@ class Client:
 
                 splitMsg = msg.split("|")
                 if splitMsg[1] == self.closeMsg:
-                    connected = False
+                    print("[CONNECTION CLOSED] Connection closed from Server")
+                    self.clientRunning = False
 
                 # convert to send type
                 if splitMsg[0] == "str":
@@ -377,6 +391,9 @@ class Client:
 
     def getClientAddress(self):
         return self.clientAddress
+
+    def isConnected(self):
+        return self.clientRunning
 
     def disconnect(self):
         """
