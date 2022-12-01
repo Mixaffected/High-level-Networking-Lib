@@ -85,8 +85,6 @@ class Server:
                 print(f"[{address}] {msg}")
 
                 splitMsg = msg.split("|")
-                if splitMsg[1] == self.closeMsg:
-                    connected = False
 
                 # convert to send type
                 if splitMsg[0] == "str":
@@ -120,15 +118,18 @@ class Server:
                 elif splitMsg[0] == "None":
                     splitMsg[1] = None
 
-                self.recvedMsg[address[0]][len(
-                    self.recvedMsg[address[0]])] = splitMsg[1]
+                if splitMsg[1] == self.closeMsg:
+                    connected = False
+                else:
+                    self.recvedMsg[address[0]][len(
+                        self.recvedMsg[address[0]])] = splitMsg[1]
 
-        if self.serverRunning and not self.serverStopped:
-            self.__sendAll(self.closeMsg, address[0])
+        if not self.serverRunning and not self.serverStopped:
+            self.__sendDirect(self.closeMsg, address[0])
 
         connection.close()
         print(f"[CONNECTION] Lost connection from {address}")
-        del self.activeConnections[address[0]]
+        self.activeConnections.pop(address[0])
         print(f"[ACTIVE CONNECTIONS] {len(self.activeConnections)}")
 
     def send(self, msg, address="all"):
@@ -137,18 +138,18 @@ class Server:
 
         Forbidden sing: |
         """
-        thread = threading.Thread(target=self.__sendAll, args=(msg, address))
+        thread = threading.Thread(
+            target=self.__sendDirect, args=(msg, address))
         thread.start()
 
-    def __sendAll(self, msg, address="all"):
+    def __sendDirect(self, msg, address="all"):
         """
         Do not use!
         """
-        if len(self.activeConnections) < 0:
+        if len(self.activeConnections) <= 0:
             return
 
         connection = {}
-        print(self.activeConnections)
         if address != "all":
             for con in self.activeConnections:
                 if address == con:
@@ -212,9 +213,22 @@ class Server:
                 self.activeConnections[con][1].send(message)
 
     def getRecivedMsg(self):
+        def removeElementFromList(self, leftClients):
+            for el in leftClients:
+                if el in self.recvedMsg.keys():
+                    self.recvedMsg.pop(el)
+
         recvMsg = dict(self.recvedMsg)
-        for element in self.recvedMsg:
-            self.recvedMsg[element] = {}
+        leftClients = []
+        for element in self.recvedMsg.keys():
+            if element in self.activeConnections:
+                self.recvedMsg[element] = {}
+            else:
+                leftClients.append(element)
+
+        thread = threading.Thread(
+            target=removeElementFromList, args=(self, leftClients))
+        thread.start()
 
         return recvMsg
 
@@ -226,7 +240,7 @@ class Server:
         """
         Stop the server instance and disconnect all clients
         """
-        self.__sendAll(self.closeMsg)
+        self.__sendDirect(self.closeMsg)
         self.serverRunning = False
         self.serverStopped = True
 
@@ -262,12 +276,11 @@ class Client:
         """
         Connect to the specified server
         """
-        isConnected = False
+        isConnected = True
 
         try:
             self.client.connect(self.address)
         except Exception as e:
-            # print(f"{e}")
             isConnected = False
             raise e
 
@@ -277,7 +290,16 @@ class Client:
 
     def send(self, msg):
         """
-        Send data to the connected server.
+        Asyncronous send data to the server.
+
+        Forbidden sing: |
+        """
+        thread = threading.Thread(target=self.__sendDirect, args=(msg))
+        thread.start()
+
+    def __sendDirect(self, msg):
+        """
+        Send data to the server wait on complete data send.
 
         Forbidden sing: |
         """
@@ -332,6 +354,9 @@ class Client:
         self.client.send(message)
 
     def __handleServerConnection(self):
+        """
+        Do not use!
+        """
         while self.clientRunning:
             messageSize = self.client.recv(
                 self.defaultBufferSize).decode(self.encoding)
@@ -342,12 +367,9 @@ class Client:
                 msg = self.client.recv(messageSize).decode(self.encoding)
                 msg = str(msg)
 
-                print(f"[SERVER] {msg}")
+                print(f"[MESSAGE] {msg}")
 
                 splitMsg = msg.split("|")
-                if splitMsg[1] == self.closeMsg:
-                    print("[CONNECTION CLOSED] Connection closed from Server")
-                    self.clientRunning = False
 
                 # convert to send type
                 if splitMsg[0] == "str":
@@ -381,10 +403,18 @@ class Client:
                 elif splitMsg[0] == "None":
                     splitMsg[1] = None
 
-                self.receivedMessages[len(self.receivedMessages)] = splitMsg[1]
+                if splitMsg[1] == self.closeMsg:
+                    print("[CONNECTION CLOSED] Connection closed from Server")
+                    self.clientRunning = False
+                else:
+                    self.receivedMessages[len(
+                        self.receivedMessages)] = splitMsg[1]
 
     def getRecvedMsg(self):
-        return self.receivedMessages
+        recvMsg = dict(self.receivedMessages)
+        self.receivedMessages = {}
+
+        return recvMsg
 
     def getServerAddress(self):
         return self.address
