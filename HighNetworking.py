@@ -1,18 +1,28 @@
+"""
+This high level libary makes setting up a client and a server super easy.
+"""
 import socket
 import threading
+import multiprocessing
+from time import time
+from threading import current_thread
 
 
 class Server:
     """
-    The server side class.
-
+    The server side class.\n
+    \n
     Functions:\n
-    .start() starts the server.
-    .stop() stops the server.
+        .start() start the server.\n
+        .stop() stop the server.\n
+        .send() send data to one or all clients.\n
+        .getRecivedMsg() get all received messages.\n
+        .getConnections() get all connections.
     """
 
-    serverRunning = True
+    serverRunning = False
     serverStopped = False
+    startTime = -1
 
     encoding = "utf-8"
     closeMsg = "/CLOSECON"
@@ -35,29 +45,63 @@ class Server:
         """
         Start the server instance
         """
+        if self.serverRunning:
+            print("[WARNING] Server already started!")
+            return
+        elif multiprocessing.current_process().name != "MainProcess":
+            return
+
+        self.startTime = time()
+        self.serverRunning = True
+
+        # set up the socket to IPv4 and TCP Stream
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         print(f"[SERVER] Server starting...")
 
+        # bind to the given address and set max Connections
         self.server.bind(self.address)
-        self.server.listen(self.serverMaxConnections)
-
         print(f"[SERVER] Server started")
+
+        self.server.listen(self.serverMaxConnections)
         print(f"[SERVER] Listening on {self.serverIp}:{self.serverPort}")
 
-        thread = threading.Thread(target=self.__waitForConnection)
+        # start new thread to handle incoming connections add it to the serverThreads dict
+        thread = self.__startNewProcess(target=self.waitForConnection)
         self.serverThreads["waitForConThread"] = thread
         thread.start()
 
-    def __waitForConnection(self):
+    def __startNewProcess(self, target, args=(), name="") -> multiprocessing.Process:
         """
         Do not use!
         """
+        if multiprocessing.current_process().name == "MainProcess" or "processHandler":
+            if name != "":
+                thread = multiprocessing.Process(
+                    target=target, args=args, name=name)
+            else:
+                thread = multiprocessing.Process(target=target, args=args)
+
+            return thread
+
+    def waitForConnection(self):
+        """
+        Do not use!
+        """
+
+        currProcess = multiprocessing.current_process()
+        currProcess.name = "processHandler"
+        print(multiprocessing.current_process().name)
+
+        # run while the server is running
         while self.serverRunning:
+            # if incoming connection accept it WARNING BLOCKING FUNCTION
             connection, address = self.server.accept()
 
+            # backchecks if server is running to prevent errors
             if self.serverRunning:
-                thread = threading.Thread(
+                # start new thread to handle Connection
+                thread = multiprocessing.Process(
                     target=self.__handleConnection, args=(connection, address))
                 thread.start()
 
@@ -65,25 +109,36 @@ class Server:
         """
         Do not use!
         """
+        # The first message is the lenght of the second message
+
         print(f"[CONNECTION] Got connection from {address}")
-        self.activeConnections[address[0]] = [address, connection]
+        # add the address and connection to the activeConnections dict
+        self.activeConnections[address[0]] = (address, connection)
+        # add the message object to the recvedMsg dict
         self.recvedMsg[address[0]] = {}
         print(f"[ACTIVE CONNECTIONS] {len(self.activeConnections)}")
 
         connected = True
 
+        # run as long the server should run and the client is connected
         while self.serverRunning and connected:
+            # recve the first message WARNING NEW CONNECTIONS SEND ONE EMPTY MESSAGE: ""
             messageSize = connection.recv(
                 self.serverDefaultBufferSize).decode(self.encoding)
 
+            # check if message isnt empty
             if messageSize:
+
+                # converts the message to an int
                 messageSize = int(messageSize)
 
+                # recve the actual message with the size of the
                 msg = connection.recv(messageSize).decode(self.encoding)
                 msg = str(msg)
 
                 print(f"[{address}] {msg}")
 
+                # convert the message back to its original type
                 splitMsg = msg.split("|")
 
                 # convert to send type
@@ -132,20 +187,22 @@ class Server:
         self.activeConnections.pop(address[0])
         print(f"[ACTIVE CONNECTIONS] {len(self.activeConnections)}")
 
-    def send(self, msg, address="all"):
+    def send(self, msg: str, address="all"):
         """
         Send data to the connected client.
 
         Forbidden sing: |
         """
-        thread = threading.Thread(
+        # start a thread to send data asynchronous
+        thread = multiprocessing.Process(
             target=self.__sendDirect, args=(msg, address))
         thread.start()
 
-    def __sendDirect(self, msg, address="all"):
+    def __sendDirect(self, msg: str, address="all"):
         """
         Do not use!
         """
+        # check if some client is connected
         if len(self.activeConnections) <= 0:
             return
 
@@ -199,25 +256,38 @@ class Server:
         else:
             message = f"{msg}"
 
+        # message get encoded
         message = message.encode(self.encoding)
+        # the byte lengh
         msgLenght = len(message)
+        # byte lengh get encoded
         sendLenght = str(msgLenght).encode(self.encoding)
+        # the buffer get filled with empty bytes
         sendLenght += b" " * (self.serverDefaultBufferSize - len(sendLenght))
 
+        # check if for one or for all
         if connection != "all":
+            # send to one client
             connection.send(sendLenght)
             connection.send(message)
         elif connection == "all":
+            # send to all clients
             for con in self.activeConnections:
                 self.activeConnections[con][1].send(sendLenght)
                 self.activeConnections[con][1].send(message)
 
-    def getRecivedMsg(self):
+    def getRecivedMsg(self) -> dict:
+        """
+        Get all received messages
+        """
+
+        # remove all left clients from recvedMsg dict
         def removeElementFromList(self, leftClients):
             for el in leftClients:
                 if el in self.recvedMsg.keys():
                     self.recvedMsg.pop(el)
 
+        # get all recved messages
         recvMsg = dict(self.recvedMsg)
         leftClients = []
         for element in self.recvedMsg.keys():
@@ -226,13 +296,18 @@ class Server:
             else:
                 leftClients.append(element)
 
-        thread = threading.Thread(
-            target=removeElementFromList, args=(self, leftClients))
-        thread.start()
+        if leftClients != []:
+            thread = multiprocessing.Process(
+                target=removeElementFromList, args=(self, leftClients))
+            thread.start()
 
         return recvMsg
 
-    def getConnections(self):
+    # return all connections
+    def getConnections(self) -> dict:
+        """
+        Get dict of all active connections
+        """
         return self.activeConnections
 
     # Stop the server
@@ -240,9 +315,18 @@ class Server:
         """
         Stop the server instance and disconnect all clients
         """
-        self.__sendDirect(self.closeMsg)
+        print("[SERVER] Stopping...")
+        self.__sendDirect(self.closeMsg, "all")
         self.serverRunning = False
         self.serverStopped = True
+
+        for thread in self.serverThreads.items():
+            if thread.is_alive():
+                thread.terminate()
+
+            thread.close()
+
+        print("[SERVER] Stopped")
 
 
 class Client:
@@ -343,7 +427,7 @@ class Client:
         if type(typeOf) == str:
             message = f"{typeOf}|{msg}"
         else:
-            message = f"{msg}"
+            message = f"|{msg}"
 
         message = message.encode(self.encoding)
         msgLenght = len(message)
