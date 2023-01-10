@@ -67,7 +67,7 @@ class Server:
         print(f"[SERVER] Listening on {self.serverIp}:{self.serverPort}")
 
         # start new thread to handle incoming connections add it to the serverThreads dict
-        thread = self.__startNewProcess(target=self.waitForConnection)
+        thread = self.__startNewProcess(target=self._waitForConnection)
         self.serverThreads["waitForConThread"] = thread
         thread.start()
 
@@ -84,14 +84,13 @@ class Server:
 
             return thread
 
-    def waitForConnection(self):
+    def _waitForConnection(self):
         """
         Do not use!
         """
 
         currProcess = multiprocessing.current_process()
         currProcess.name = "processHandler"
-        print(multiprocessing.current_process().name)
 
         # run while the server is running
         while self.serverRunning:
